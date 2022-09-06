@@ -1,0 +1,96 @@
+Resources:
+  Recorder:
+    Type: AWS::Config::ConfigurationRecorder
+    Properties:
+      Name: ConfigurationRecorder
+    RecordingGroup:
+      AllSupported: true
+      IncludeGlobalResourceTypes: true
+    RoleARN: !GetAtt RecorderRole.Arn
+
+  DeliveryChannel:
+    Type: AWS::Config::DeliveryChannel
+    Properties:
+      ConfigSnapshotDeliveryProperties:
+      DeliveryFrequency: One_Hour
+    Name: BaseDeliveryChannel
+    S3BucketName: !Ref RecorderBucket
+
+  RecorderBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      DeletionPolicy: Retain
+    BucketName: !Sub config-bucket-${AWS::AccountId}
+    OwnershipControls:
+      Rules:
+        - ObjectOwnership: BucketOwnerPreferred
+    PublicAccessBlockConfiguration:
+      BlockPublicAcls: true
+      BlockPublicPolicy: true
+      IgnorePublicAcls: true
+      RestrictPublicBuckets: true
+
+  RecorderBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref RecorderBucket
+    PolicyDocument:
+      Version: "2012-10-17"
+      Statement:
+        - Sid: AWSConfig
+          Effect: Allow
+          Principal:
+            Service: "config.amazonaws.com"
+          Action:
+            - s3:GetBucketAcl
+            - s3:ListBucket
+          Resource: !Sub arn:aws:s3:::${RecorderBucket}
+        - Sid: AWSConfigBucketDelivery
+          Effect: Allow
+          Principal:
+            Service: "config.amazonaws.com"
+          Action: "s3:PutObject"
+          Resource: !Sub "arn:aws:s3:::${RecorderBucket}/AWSLogs/${AWS::AccountId}/Config/*"
+          Condition:
+            StringEquals:
+              "s3:x-amz-acl": "bucket-owner-full-control"
+
+  RecorderRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+      Version: 2012-10-17
+      Statement:
+        - Effect: Allow
+          Principal:
+            Service: "config.amazonaws.com"
+          Action: sts:AssumeRole
+    ManagedPolicyArns:
+      - "arn:aws:iam::aws:policy/service-role/AWS_ConfigRole"
+    Policies:
+      - PolicyName: S3
+        PolicyDocument:
+          Version: 2012-10-17
+          Statement:
+            - Effect: Allow
+              Action:
+                - "s3:PutObject"
+                - "s3:PutObjectAcl"
+              Resource:
+                - !Sub "arn:aws:s3:::${RecorderBucket}/AWSLogs/${AWS::AccountId}/*"
+              Condition:
+                StringLike:
+                  "s3:x-amz-acl": "bucket-owner-full-control"
+            - Effect: Allow
+              Action:
+                - "s3:GetBucketAcl"
+              Resource:
+                - !Sub "arn:aws:s3:::${RecorderBucket}"
+
+  TestRule:
+    Type: AWS::Config::ConfigRule
+    Properties:
+      ConfigRuleName: ec2-volume-inuse
+    Source:
+      Owner: AWS
+      SourceIdentifier: EC2_VOLUME_INUSE_CHECK
